@@ -1,6 +1,6 @@
 [package]
 name = "dar-al-hikayat-desktop"
-version = "3.0.2"
+version = "3.0.3"
 description = "Dar Al-Hikayat desktop application"
 authors = ["Dar Al-Hikayat"]
 edition = "2021"
