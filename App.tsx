@@ -445,8 +445,7 @@ function App() {
         }
       };
 
-      // Check after the first screen is ready, then re-check when the user taps
-      // the Android update notification and the app becomes active again.
+      // Check after the first screen is ready; manual checks remain available in Settings.
       const timer = setTimeout(() => {
         void checkAndPresentUpdate(false);
         void refreshPrayerAlarmsSilently();

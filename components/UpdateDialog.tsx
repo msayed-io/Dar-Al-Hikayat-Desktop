@@ -8,7 +8,6 @@ import {
   Loader2,
   RefreshCw,
   ExternalLink,
-  ShieldAlert,
   ArrowDownToLine,
   X,
 } from "lucide-react";
@@ -22,8 +21,6 @@ import {
   downloadUpdate,
   installDownloadedUpdate,
   ignoreUpdateVersion,
-  checkInstallPermission,
-  openInstallSettings,
 } from "../lib/app-updater";
 
 export const UpdateDialog: React.FC = () => {
@@ -42,7 +39,7 @@ export const UpdateDialog: React.FC = () => {
   });
 
   const [step, setStep] = useState<
-    "prompt" | "downloading" | "verifying" | "ready_to_install" | "permission_required" | "error"
+    "prompt" | "downloading" | "verifying" | "ready_to_install" | "error"
   >("prompt");
 
   const [progress, setProgress] = useState<DownloadProgress>({
@@ -123,14 +120,10 @@ export const UpdateDialog: React.FC = () => {
     }
   };
 
-  const handleGrantPermission = async () => {
-    await openInstallSettings();
-    setStep("prompt");
-  };
 
   const handleIgnore = () => {
     if (dialogState.updateInfo) {
-      ignoreUpdateVersion(dialogState.updateInfo.versionCode);
+      ignoreUpdateVersion(dialogState.updateInfo.versionName);
     }
     closeUpdateDialog();
   };
@@ -266,7 +259,7 @@ export const UpdateDialog: React.FC = () => {
                 }}
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>تحديث الآن</span>
+                <span>تنزيل EXE الآن</span>
               </button>
 
               {!isMandatory && (
@@ -405,14 +398,14 @@ export const UpdateDialog: React.FC = () => {
               className="text-base font-zain-xbold mb-1 leading-tight text-center"
               style={{ color: currentTheme.text }}
             >
-              اكتمل التنزيل بنجاح
+              تم فتح تنزيل التحديث
             </h2>
 
             <p
               className="text-xs font-zain-reg mb-4 opacity-75 leading-relaxed text-center px-1"
               style={{ color: currentTheme.text }}
             >
-              اضغط على تثبيت للمتابعة وتحديث التطبيق فورًا.
+              تم فتح تنزيل مثبت Windows الرسمي. بعد اكتمال التنزيل شغّل ملف EXE لتثبيت الإصدار الجديد.
             </p>
 
             <button
@@ -428,69 +421,12 @@ export const UpdateDialog: React.FC = () => {
               }}
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              <span>تثبيت التحديث</span>
+              <span>فتح تنزيل EXE مرة أخرى</span>
             </button>
           </>
         )}
 
-        {/* ─── STEP 5: Unknown App Sources Permission Required ─── */}
-        {step === "permission_required" && (
-          <>
-            <div className="flex justify-center mb-3">
-              <ShieldAlert
-                className="w-7 h-7 text-amber-500"
-                strokeWidth={2}
-              />
-            </div>
-
-            <h2
-              className="text-base font-zain-xbold mb-1 leading-tight text-center"
-              style={{ color: currentTheme.text }}
-            >
-              إذن تثبيت التحديثات
-            </h2>
-
-            <p
-              className="text-xs font-zain-reg mb-4 opacity-75 leading-relaxed text-center px-1"
-              style={{ color: currentTheme.text }}
-            >
-              يتطلب نظام أندرويد تفعيل خيار <strong>"السماح بتثبيت التطبيقات من هذا المصدر"</strong> لمرة واحدة.
-            </p>
-
-            <div className="flex items-center justify-center gap-2.5">
-              <button
-                onClick={handleGrantPermission}
-                className="font-zain-bold text-xs shadow-sm active:scale-95 transition-all flex items-center justify-center cursor-pointer"
-                style={{
-                  height: "34px",
-                  padding: "0 18px",
-                  borderRadius: "9999px",
-                  backgroundColor: currentTheme.accent,
-                  color: currentTheme.bg,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                تفعيل الإذن
-              </button>
-
-              <button
-                onClick={() => setStep("prompt")}
-                className="font-zain-bold text-xs active:scale-95 transition-all cursor-pointer opacity-70 hover:opacity-100 flex items-center justify-center"
-                style={{
-                  height: "34px",
-                  padding: "0 14px",
-                  borderRadius: "9999px",
-                  color: currentTheme.secondary,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                رجوع
-              </button>
-            </div>
-          </>
-        )}
-
-        {/* ─── STEP 6: Error State ─── */}
+        {/* ─── ERROR STATE ─── */}
         {step === "error" && (
           <>
             <div className="flex justify-center mb-3">
