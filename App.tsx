@@ -17,6 +17,7 @@ import {
 } from "./lib/prayer-alarms";
 import { logoAsset } from "./lib/logo-assets";
 import RemoteKeyboardMobilePage from "./components/RemoteKeyboardMobilePage";
+import { authenticateWithWindowsHello, hasWindowsHelloCredential } from "./lib/windows-auth";
 
 // The main component that manages views and persistent navigation
 const AppContent = () => {
@@ -278,9 +279,15 @@ const BiometricGuard: React.FC<{ children: React.ReactNode }> = ({
   const authenticate = async () => {
     if (isAuthenticatingRef.current) return;
     isAuthenticatingRef.current = true;
-    lastAuthenticatedAtRef.current = Date.now();
-    setIsUnlocked(true);
-    window.setTimeout(() => { isAuthenticatingRef.current = false; }, 800);
+    try {
+      const authenticated = await authenticateWithWindowsHello();
+      if (authenticated) {
+        lastAuthenticatedAtRef.current = Date.now();
+        setIsUnlocked(true);
+      }
+    } finally {
+      isAuthenticatingRef.current = false;
+    }
   };
 
   useEffect(() => {
@@ -288,12 +295,15 @@ const BiometricGuard: React.FC<{ children: React.ReactNode }> = ({
       const lockState = localStorage.getItem("dar_app_lock_enabled") === "true";
       setIsLockEnabled(lockState);
 
-      if (lockState) {
+      if (lockState && hasWindowsHelloCredential()) {
         setIsUnlocked(false);
-        // Automatically prompt for fingerprint/biometric immediately
-        setTimeout(() => {
-          authenticate();
-        }, 150);
+        // The first attempt is best-effort; the lock screen remains available for a user gesture.
+        setTimeout(() => { void authenticate(); }, 150);
+      } else if (lockState) {
+        // Recover safely from the legacy fake lock that had no Windows Hello credential.
+        localStorage.setItem("dar_app_lock_enabled", "false");
+        setIsLockEnabled(false);
+        setIsUnlocked(true);
       } else {
         setIsUnlocked(true);
       }
@@ -303,14 +313,17 @@ const BiometricGuard: React.FC<{ children: React.ReactNode }> = ({
 
     // Listen for custom event when user toggles lock in Settings
     const handleLockChanged = (e: Event) => {
-      const customEvt = e as CustomEvent<{ enabled: boolean }>;
+      const customEvt = e as CustomEvent<{ enabled: boolean; authenticated?: boolean }>;
       const isEnabled = customEvt.detail?.enabled ?? (localStorage.getItem("dar_app_lock_enabled") === "true");
       setIsLockEnabled(isEnabled);
       if (isEnabled) {
-        setIsUnlocked(false);
-        setTimeout(() => {
-          authenticate();
-        }, 100);
+        if (customEvt.detail?.authenticated) {
+          lastAuthenticatedAtRef.current = Date.now();
+          setIsUnlocked(true);
+        } else {
+          setIsUnlocked(false);
+          setTimeout(() => { void authenticate(); }, 100);
+        }
       } else {
         setIsUnlocked(true);
       }
@@ -332,9 +345,7 @@ const BiometricGuard: React.FC<{ children: React.ReactNode }> = ({
         if (wasInBackgroundRef.current) {
           wasInBackgroundRef.current = false;
           setIsUnlocked(false);
-          setTimeout(() => {
-            authenticate();
-          }, 150);
+          setTimeout(() => { void authenticate(); }, 150);
         }
       }
     };
@@ -389,7 +400,7 @@ const BiometricGuard: React.FC<{ children: React.ReactNode }> = ({
               className="text-sm font-zain-reg opacity-60"
               style={{ color: currentTheme.text }}
             >
-              المصادقة ببصمة الإصبع أو نظام حماية الهاتف
+              المصادقة Windows Hello بالبصمة أو PIN
             </p>
           </div>
         </div>

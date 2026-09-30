@@ -867,7 +867,7 @@ export async function requestExecutiveDecision({
       };
 
       if (apiKey) {
-        // Direct execution against Google Generative Language API (Android Native & Web with custom key)
+        // Direct execution against Google Generative Language API (Tauri Desktop/Web with custom key)
         rawData = await generateGeminiDirectly({
           apiKey,
           systemInstruction: executiveInstruction || UNIFIED_AGENT_INSTRUCTION,

@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"واجهة دار الحكايات الأساسية بصلاحيات Tauri الأساسية فقط.","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-show","opener:default"],"platforms":["windows","linux","macOS"]}}
+{"default":{"identifier":"default","description":"واجهة دار الحكايات الأساسية بصلاحيات Tauri الأساسية فقط.","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-show","opener:default","notification:default"],"platforms":["windows","linux","macOS"]}}

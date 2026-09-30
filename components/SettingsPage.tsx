@@ -41,6 +41,7 @@ import {
   openUpdateDialog,
   type AppVersion,
 } from "../lib/app-updater";
+import { authenticateWithWindowsHello, registerWindowsHelloCredential } from "../lib/windows-auth";
 import {
   loadManagedKeysAsync,
   addManagedKey,
@@ -283,22 +284,24 @@ const SettingsPage: React.FC = () => {
 
   const toggleLock = async () => {
     if (!isLocked) {
-      localStorage.setItem("dar_app_lock_enabled", "true");
-      setIsLocked(true);
-      window.dispatchEvent(
-        new CustomEvent("dar_app_lock_changed", { detail: { enabled: true } })
-      );
-    } else {
       try {
+        const registered = await registerWindowsHelloCredential();
+        if (!registered) return;
+        localStorage.setItem("dar_app_lock_enabled", "true");
+        setIsLocked(true);
+        window.dispatchEvent(
+          new CustomEvent("dar_app_lock_changed", { detail: { enabled: true, authenticated: true } })
+        );
       } catch (err) {
-        console.log("Biometric verification cancelled or failed on unlock toggle", err);
-        return;
+        console.warn("Windows Hello enrollment cancelled or failed", err);
       }
-
+    } else {
+      const authenticated = await authenticateWithWindowsHello();
+      if (!authenticated) return;
       localStorage.setItem("dar_app_lock_enabled", "false");
       setIsLocked(false);
       window.dispatchEvent(
-        new CustomEvent("dar_app_lock_changed", { detail: { enabled: false } })
+        new CustomEvent("dar_app_lock_changed", { detail: { enabled: false, authenticated: true } })
       );
     }
   };
@@ -917,7 +920,7 @@ const SettingsPage: React.FC = () => {
                     className="font-zain-reg text-xs opacity-60 mt-1 leading-tight"
                     style={{ color: currentTheme.text }}
                   >
-                    تأمين الحكايات بالبصمة
+                    تأمين الحكايات ببصمة Windows Hello أو PIN
                   </span>
                 </div>
               </div>

@@ -27,17 +27,17 @@ export function isThinkingRejection(err: any): boolean {
 }
 
 /**
- * Determines whether the app is running in a native mobile environment (Tauri/desktop/iOS)
+ * Determines whether the app is running in a native Tauri environment (desktop/mobile/iOS)
  * or standalone local WebView without an Express server backend.
  */
 export function isNativeMobileEnvironment(): boolean {
   try {
     if (typeof window === "undefined") return false;
     const protocol = window.location?.protocol || "";
-    if (protocol === "tauri:" || protocol === "file:") {
+    const host = window.location?.hostname || "";
+    if (protocol === "tauri:" || protocol === "file:" || host === "tauri.localhost") {
       return true;
     }
-    const host = window.location?.hostname || "";
     if (host === "localhost" && window.location?.port === "") {
       return true;
     }
