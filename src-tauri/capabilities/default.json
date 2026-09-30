@@ -5,6 +5,7 @@
   "windows": ["main"],
   "platforms": ["windows", "linux", "macOS"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-show"
   ]
 }
