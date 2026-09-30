@@ -38,7 +38,11 @@
   <body>
     <div id="root"></div>
     <script>
-      if ('serviceWorker' in navigator) {
+      // Service Workers belong to the browser/PWA build, not the Tauri desktop shell.
+      // Registering one on tauri.localhost can race the initial WebView navigation.
+      const isTauriDesktop = window.location.hostname === 'tauri.localhost' ||
+        window.location.protocol === 'asset:';
+      if (!isTauriDesktop && 'serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').then(registration => {
             console.log('SW registered: ', registration);

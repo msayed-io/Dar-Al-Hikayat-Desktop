@@ -1,41 +1,116 @@
-name: Build Dar Al-Hikayat Windows
+name: Release Dar Al-Hikayat Windows
 
 on:
   workflow_dispatch:
     inputs:
-      configuration:
-        description: "Build configuration"
+      release_type:
+        description: "Release version bump"
         required: true
         type: choice
         options:
-          - release
-        default: release
-  push:
-    tags:
-      - "v*"
-
-permissions:
-  contents: read
+          - patch
+        default: patch
 
 concurrency:
-  group: dar-al-hikayat-windows-${{ github.ref }}
-  cancel-in-progress: true
+  group: dar-al-hikayat-release
+  cancel-in-progress: false
 
 env:
   CI: true
 
 jobs:
-  validate:
-    name: Validate web application
+  prepare-release:
+    name: Bump version and prepare release
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.commit.outputs.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Bump patch version in all package manifests
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(node <<'NODE'
+          const fs = require('fs');
+          const pkgPath = 'package.json';
+          const lockPath = 'package-lock.json';
+          const tauriPath = 'src-tauri/tauri.conf.json';
+          const cargoPath = 'src-tauri/Cargo.toml';
+          const cargoLockPath = 'src-tauri/Cargo.lock';
+
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          const [major, minor, patch] = pkg.version.split('.').map(Number);
+          const nextVersion = `${major}.${minor}.${patch + 1}`;
+          pkg.version = nextVersion;
+          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+
+          const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+          lock.version = nextVersion;
+          if (lock.packages && lock.packages['']) lock.packages[''].version = nextVersion;
+          fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + '\n');
+
+          const tauri = JSON.parse(fs.readFileSync(tauriPath, 'utf8'));
+          tauri.version = nextVersion;
+          fs.writeFileSync(tauriPath, JSON.stringify(tauri, null, 2) + '\n');
+
+          let cargo = fs.readFileSync(cargoPath, 'utf8');
+          cargo = cargo.replace(/(\[package\][\s\S]*?\nversion = ")[^"]+(")/, `$1${nextVersion}$2`);
+          fs.writeFileSync(cargoPath, cargo);
+
+          let cargoLock = fs.readFileSync(cargoLockPath, 'utf8');
+          cargoLock = cargoLock.replace(
+            /(name = "dar-al-hikayat-desktop"\nversion = ")[^"]+(")/,
+            `$1${nextVersion}$2`
+          );
+          fs.writeFileSync(cargoLockPath, cargoLock);
+          process.stdout.write(nextVersion);
+          NODE
+          )
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Prepared Dar Al-Hikayat version $VERSION"
+
+      - name: Commit version bump and create release tag
+        id: commit
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
+          git commit -m "release: v${VERSION}"
+          git tag -a "v${VERSION}" -m "Dar Al-Hikayat Desktop v${VERSION}"
+          git push origin HEAD:main --follow-tags
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  validate:
+    name: Validate web application
+    needs: prepare-release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout prepared release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.sha }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
+
       - name: Install dependencies
         run: npm ci
       - name: Type check
@@ -47,27 +122,35 @@ jobs:
 
   build-windows:
     name: Build Windows EXE and MSI
-    needs: validate
+    needs: [prepare-release, validate]
     runs-on: windows-2025
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
+      - name: Checkout prepared release
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.sha }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
+
       - name: Setup Rust stable MSVC
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable-x86_64-pc-windows-msvc
+
       - name: Install dependencies
         run: npm ci
       - name: Verify Tauri CLI
         run: npx tauri --version
       - name: Build Tauri Windows packages
         run: npx tauri build
+
       - name: Verify generated installers
         shell: pwsh
         run: |
@@ -77,12 +160,54 @@ jobs:
           if (-not $msi) { throw "No Windows MSI installer was generated." }
           $exe | Select-Object FullName, Length
           $msi | Select-Object FullName, Length
+
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
         with:
-          name: dar-al-hikayat-windows-${{ github.sha }}
+          name: dar-al-hikayat-windows-${{ needs.prepare-release.outputs.version }}-${{ needs.prepare-release.outputs.sha }}
           if-no-files-found: error
           retention-days: 14
           path: |
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [prepare-release, validate, build-windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare-release.outputs.version }}
+      SHA: ${{ needs.prepare-release.outputs.sha }}
+    steps:
+      - name: Download Windows installers
+        uses: actions/download-artifact@v4
+        with:
+          name: dar-al-hikayat-windows-${{ needs.prepare-release.outputs.version }}-${{ needs.prepare-release.outputs.sha }}
+          path: release-assets
+
+      - name: Verify release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          find release-assets -type f -print -exec sha256sum {} \;
+          test -n "$(find release-assets -type f -name '*.exe' -print -quit)"
+          test -n "$(find release-assets -type f -name '*.msi' -print -quit)"
+
+      - name: Create GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t assets < <(find release-assets -type f \( -name '*.exe' -o -name '*.msi' \) -print)
+          if [ "${#assets[@]}" -ne 2 ]; then
+            echo "Expected exactly two Windows installer assets, found ${#assets[@]}" >&2
+            exit 1
+          fi
+          gh release create "v${VERSION}" \
+            "${assets[@]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Dar Al-Hikayat Desktop ${VERSION} for Windows" \
+            --generate-notes
