@@ -276,71 +276,10 @@ export async function exportStoryToPdf(
   }
 }
 
-import { Capacitor, registerPlugin } from "@capacitor/core";
-import { Filesystem, Directory } from "@capacitor/filesystem";
-import { Share } from "@capacitor/share";
 
-interface DownloadNotificationPluginType {
-  startDownload(options: { filename: string; base64: string }): Promise<{ success: boolean; filename: string }>;
-}
-
-const DownloadNotification = registerPlugin<DownloadNotificationPluginType>("DownloadNotification");
-
-/** تنزيل الـ Blob كملف مع دعم كامل لبيئة أندرويد عبر الحفظ والمشاركة */
 export async function downloadBlob(blob: Blob, filename: string): Promise<void> {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      // 1. تحويل الـ Blob إلى Base64
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onloadend = () => {
-          const res = reader.result as string;
-          const base64 = res.split(",")[1];
-          resolve(base64);
-        };
-        reader.onerror = reject;
-      });
-      reader.readAsDataURL(blob);
-      const base64 = await base64Promise;
-
-      if (Capacitor.getPlatform() === "android") {
-        // تشغيل ميزة إشعارات تحميل الملفات المخصصة للأندرويد
-        await DownloadNotification.startDownload({
-          filename,
-          base64,
-        });
-      } else {
-        // 2. كتابة وحفظ الملف في مجلد المستندات الخاص بالتطبيق للمنصات الأخرى
-        const result = await Filesystem.writeFile({
-          path: filename,
-          data: base64,
-          directory: Directory.Documents,
-        });
-
-        // 3. فتح قائمة المشاركة الأصلية
-        await Share.share({
-          title: filename,
-          text: `تم تصدير ملف الحكاية: ${filename}`,
-          url: result.uri,
-          dialogTitle: "تصدير وفتح الملف",
-        });
-      }
-    } catch (error) {
-      console.error("Error saving/sharing file in native:", error);
-      webDownload(blob, filename);
-    }
-  } else {
-    webDownload(blob, filename);
-  }
-}
-
-function webDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

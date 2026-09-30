@@ -1,5 +1,3 @@
-import { Capacitor } from "@capacitor/core";
-import { Geolocation } from "@capacitor/geolocation";
 import type { PrayerLocation } from "./prayer-config";
 import { CITIES, type CityData } from "./prayer-cities";
 import { reverseGeocodeCoordinates } from "./reverse-geocoding";
@@ -107,50 +105,8 @@ export function resetLocationPermissionSessionFlag(): void {
  *   - اطلب النوعين معاً في نفس الطلب: ["location", "coarseLocation"].
  */
 export async function checkOrRequestLocationPermissionSmartly(): Promise<boolean> {
-  // على الويب: تخطَّ طلب الإذن تماماً
-  if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable("Geolocation")) {
-    return true;
-  }
-
-  try {
-    // 1. تحقق أولاً من حالة الإذن الحالية
-    const current = await Geolocation.checkPermissions();
-    const alreadyGranted = current.location === "granted" || current.coarseLocation === "granted";
-    if (alreadyGranted) {
-      return true;
-    }
-
-    // 2. فحص هل تم الطلب مسبقاً في هذه الجلسة
-    const sessionAlreadyRequested =
-      hasRequestedPermissionThisSession ||
-      (typeof sessionStorage !== "undefined" &&
-        sessionStorage.getItem("dar_gps_permission_requested_this_session") === "true");
-
-    if (sessionAlreadyRequested) {
-      // تم الطلب في هذه الجلسة مسبقاً؛ لا نعيد الإزعاج للمستخدم
-      return false;
-    }
-
-    // وضع العلم قبل إظهار نافذة الطلب
-    hasRequestedPermissionThisSession = true;
-    if (typeof sessionStorage !== "undefined") {
-      try {
-        sessionStorage.setItem("dar_gps_permission_requested_this_session", "true");
-      } catch {
-        // ignore
-      }
-    }
-
-    // 3. اطلب النوعين معاً في نفس الطلب
-    const requested = await Geolocation.requestPermissions({
-      permissions: ["location", "coarseLocation"],
-    });
-
-    return requested.location === "granted" || requested.coarseLocation === "granted";
-  } catch (err) {
-    console.warn("Location permission evaluation/request error:", err);
-    return false;
-  }
+  if (typeof navigator === "undefined" || !("geolocation" in navigator)) return false;
+  return true;
 }
 
 /**
@@ -227,32 +183,7 @@ export interface FetchCoordsOptions {
 export async function fetchRawCoordinates(options: FetchCoordsOptions): Promise<RawCoords> {
   const safetyTimeoutMs = options.timeout + 1500;
 
-  // 1. التطبيق الأصلي (Capacitor Native)
-  if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("Geolocation")) {
-    const nativePromise = Geolocation.getCurrentPosition({
-      enableHighAccuracy: options.enableHighAccuracy,
-      timeout: options.timeout,
-      maximumAge: options.maximumAge,
-      enableLocationFallback: options.enableLocationFallback ?? true,
-    });
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error("NATIVE_GPS_TIMEOUT")), safetyTimeoutMs);
-    });
-
-    const pos = await Promise.race([nativePromise, timeoutPromise]);
-    if (!pos || !pos.coords || !Number.isFinite(pos.coords.latitude) || !Number.isFinite(pos.coords.longitude)) {
-      throw new Error("INVALID_NATIVE_COORDS");
-    }
-
-    return {
-      latitude: pos.coords.latitude,
-      longitude: pos.coords.longitude,
-      accuracy: pos.coords.accuracy != null && Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null,
-      timestamp: pos.timestamp || Date.now(),
-    };
-  }
-
+  // Browser Web Geolocation (Tauri WebView uses the standard API).
   // 2. بيئة الويب والمتصفحات القياسية
   if (typeof navigator !== "undefined" && "geolocation" in navigator) {
     return new Promise<RawCoords>((resolve, reject) => {
@@ -424,13 +355,6 @@ export async function enrichCoordinatesToLocation(
  */
 export async function autoDetectLocation(): Promise<PrayerLocation> {
   // الطبقة 1: التحقق من الإذن بذكاء
-  if (Capacitor.isNativePlatform()) {
-    const isGranted = await checkOrRequestLocationPermissionSmartly();
-    if (!isGranted) {
-      throw new Error(LOCATION_ACTIONABLE_ERROR_MESSAGE);
-    }
-  }
-
   let rawCoords: RawCoords | null = null;
   let source: "gps_precise" | "gps_approximate" = "gps_precise";
 
@@ -438,7 +362,7 @@ export async function autoDetectLocation(): Promise<PrayerLocation> {
   // enableHighAccuracy: true
   // timeout: 10000        (10 ثوانٍ)
   // maximumAge: 0         (طلب موقع فوري طازج بدون أي كاش قديم)
-  // enableLocationFallback: true   (يسمح للنظام بالتحول لموقع الشبكة لو فشل GPS الفعلي — Capacitor فقط)
+  // enableLocationFallback: true   (يسمح للنظام بالتحول لموقع الشبكة لو فشل GPS الفعلي — Tauri فقط)
   try {
     rawCoords = await fetchRawCoordinates({
       enableHighAccuracy: true,
@@ -499,19 +423,6 @@ export async function performSilentResumeLocationRefresh(): Promise<PrayerLocati
     return null;
   }
   lastSilentResumeRefreshTimestamp = now;
-
-  // التحقق الهادئ من الإذن على الأندرويد دون فتح أي نافذة طلب
-  if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("Geolocation")) {
-    try {
-      const perms = await Geolocation.checkPermissions();
-      const isGranted = perms.location === "granted" || perms.coarseLocation === "granted";
-      if (!isGranted) {
-        return null;
-      }
-    } catch {
-      return null;
-    }
-  }
 
   try {
     const rawCoords = await fetchRawCoordinates({

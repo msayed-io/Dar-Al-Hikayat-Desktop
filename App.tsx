@@ -11,15 +11,8 @@ import LocationBottomSheet from "./components/LocationBottomSheet";
 import { UpdateDialog } from "./components/UpdateDialog";
 import { checkForUpdates, notifyUpdateAvailable, openUpdateDialog } from "./lib/app-updater";
 import { AppProvider, useApp } from "./contexts/AppContext";
-import { NativeBiometric } from "@capgo/capacitor-native-biometric";
-import { Capacitor } from "@capacitor/core";
-import { App as CapApp } from "@capacitor/app";
-import { PermissionsGuard } from "./components/PermissionsGuard";
 import {
-  requestNotificationPermission,
   schedulePrayerAlarms,
-  getLastSavedLocation,
-  loadPrayerSettings,
 } from "./lib/prayer-alarms";
 import { logoAsset } from "./lib/logo-assets";
 import RemoteKeyboardMobilePage from "./components/RemoteKeyboardMobilePage";
@@ -284,45 +277,9 @@ const BiometricGuard: React.FC<{ children: React.ReactNode }> = ({
   const authenticate = async () => {
     if (isAuthenticatingRef.current) return;
     isAuthenticatingRef.current = true;
-
-    try {
-      if (Capacitor.isNativePlatform()) {
-        const availResult = await NativeBiometric.isAvailable().catch(() => ({ isAvailable: false }));
-        if (!availResult.isAvailable) {
-          console.warn("Biometrics hardware not available on this platform");
-          lastAuthenticatedAtRef.current = Date.now();
-          setIsUnlocked(true);
-          return;
-        }
-
-        // Perform native Android biometric authentication
-        await NativeBiometric.verifyIdentity({
-          reason: "يرجى تأكيد هويتك لفتح التطبيق",
-          title: "دَارُ الحِكَايَاتِ",
-          subtitle: "قفل التطبيق",
-          description: "استخدم بصمة الإصبع أو رمز قفل الشاشة",
-          useFallback: true,
-          maxAttempts: 5,
-        });
-
-        lastAuthenticatedAtRef.current = Date.now();
-        setIsUnlocked(true);
-      } else {
-        // Web preview / Browser simulation
-        setTimeout(() => {
-          lastAuthenticatedAtRef.current = Date.now();
-          setIsUnlocked(true);
-        }, 300);
-      }
-    } catch (error) {
-      console.log("Biometric verification error or user cancelled:", error);
-      setIsUnlocked(false);
-    } finally {
-      // Keep isAuthenticating flag true for a 800ms cooldown to ignore trailing system resume events
-      setTimeout(() => {
-        isAuthenticatingRef.current = false;
-      }, 800);
-    }
+    lastAuthenticatedAtRef.current = Date.now();
+    setIsUnlocked(true);
+    window.setTimeout(() => { isAuthenticatingRef.current = false; }, 800);
   };
 
   useEffect(() => {
@@ -384,39 +341,9 @@ const BiometricGuard: React.FC<{ children: React.ReactNode }> = ({
     window.addEventListener("dar_app_lock_changed", handleLockChanged);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
-    // Native app resume listener
-    let resumeHandle: any = null;
-    if (Capacitor.isNativePlatform()) {
-      CapApp.addListener("appStateChange", ({ isActive }) => {
-        const lockEnabled = localStorage.getItem("dar_app_lock_enabled") === "true";
-        if (!lockEnabled) return;
-
-        if (!isActive) {
-          wasInBackgroundRef.current = true;
-        } else {
-          // Returning to foreground
-          if (isAuthenticatingRef.current) return;
-          if (Date.now() - lastAuthenticatedAtRef.current < 2500) return;
-
-          if (wasInBackgroundRef.current) {
-            wasInBackgroundRef.current = false;
-            setIsUnlocked(false);
-            setTimeout(() => {
-              authenticate();
-            }, 150);
-          }
-        }
-      }).then((handle) => {
-        resumeHandle = handle;
-      }).catch(() => {});
-    }
-
     return () => {
       window.removeEventListener("dar_app_lock_changed", handleLockChanged);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-      if (resumeHandle) {
-        resumeHandle.remove();
-      }
     };
   }, []);
 
@@ -493,12 +420,6 @@ function App() {
         try {
           const result = await checkForUpdates({ manual: false, force });
           if (result.hasUpdate && result.latestInfo && result.currentVersion) {
-            if (Capacitor.getPlatform() === "android") {
-              const notificationPermissionGranted = await requestNotificationPermission();
-              if (!notificationPermissionGranted) {
-                console.warn("Update notification skipped: Android notification permission is not granted");
-              }
-            }
             await notifyUpdateAvailable(result.latestInfo);
             openUpdateDialog(result.latestInfo, result.currentVersion, result.isMandatory);
           }
@@ -509,15 +430,9 @@ function App() {
 
       const refreshPrayerAlarmsSilently = async () => {
         try {
-          if (Capacitor.getPlatform() === "android") {
-            const loc = getLastSavedLocation();
-            if (loc) {
-              const settings = loadPrayerSettings();
-              await schedulePrayerAlarms(loc, settings.method || "egyptian");
-            }
-          }
+          await Promise.resolve();
         } catch (e) {
-          console.warn("Silent prayer alarms refresh failed:", e);
+          console.warn("Silent prayer refresh failed:", e);
         }
       };
 
@@ -528,21 +443,8 @@ function App() {
         void refreshPrayerAlarmsSilently();
       }, 1200);
 
-      let appStateHandle: { remove: () => Promise<void> } | null = null;
-      if (Capacitor.isNativePlatform()) {
-        CapApp.addListener("appStateChange", ({ isActive }) => {
-          if (isActive) {
-            void checkAndPresentUpdate(true);
-            void refreshPrayerAlarmsSilently();
-          }
-        }).then((handle) => {
-          appStateHandle = handle;
-        }).catch(() => {});
-      }
-
       return () => {
         clearTimeout(timer);
-        appStateHandle?.remove();
       };
     }
   }, [showSplash]);
@@ -553,11 +455,9 @@ function App() {
         <SplashScreen onFinish={() => setShowSplash(false)} />
       ) : (
         <BiometricGuard>
-          <PermissionsGuard>
-            <div className="animate-in fade-in duration-700 min-h-screen">
-              <AppContent />
-            </div>
-          </PermissionsGuard>
+          <div className="animate-in fade-in duration-700 min-h-screen">
+            <AppContent />
+          </div>
         </BiometricGuard>
       )}
     </AppProvider>

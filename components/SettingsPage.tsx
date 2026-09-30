@@ -35,8 +35,6 @@ import {
   schedulePrayerAlarms,
   cityToLocation,
 } from "../lib/prayer-alarms";
-import { NativeBiometric } from "@capgo/capacitor-native-biometric";
-import { Capacitor } from "@capacitor/core";
 import {
   checkForUpdates,
   getCurrentAppVersion,
@@ -292,18 +290,6 @@ const SettingsPage: React.FC = () => {
       );
     } else {
       try {
-        if (Capacitor.isNativePlatform()) {
-          const avail = await NativeBiometric.isAvailable().catch(() => ({ isAvailable: false }));
-          if (avail.isAvailable) {
-            await NativeBiometric.verifyIdentity({
-              reason: "يرجى تأكيد هويتك لإلغاء قفل التطبيق",
-              title: "دَارُ الحِكَايَاتِ",
-              subtitle: "إلغاء قفل التطبيق",
-              description: "استخدم بصمة الإصبع أو رمز قفل الهاتف",
-              useFallback: true,
-            });
-          }
-        }
       } catch (err) {
         console.log("Biometric verification cancelled or failed on unlock toggle", err);
         return;

@@ -1,9 +1,7 @@
 {
   "name": "Dar-Al-Hikayat",
   "description": "تطبيق دَارُ الحِكَايَاتِ - محرابٌ مقدس لفنانة السرد ومفكرة إبداعية مع أذكار ومواقيت الصلاة",
-    "requestFramePermissions": [
-      "geolocation"
-    ],
+    "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]

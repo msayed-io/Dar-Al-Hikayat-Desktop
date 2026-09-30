@@ -27,8 +27,11 @@ dist-ssr
 !*.jar
 !gradle-wrapper.jar
 !gradle/wrapper/gradle-wrapper.jar
-!android/gradle/wrapper/gradle-wrapper.jar
 
-# Android signing keys must never be committed
 *.keystore
 *.jks
+
+# Generated build output
+src-tauri/target/
+dist/
+node_modules/

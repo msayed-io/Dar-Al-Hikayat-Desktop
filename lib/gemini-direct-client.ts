@@ -1,4 +1,3 @@
-import { Capacitor } from "@capacitor/core";
 import { MODEL_LADDER, getModelsToTry, isModelFallbackError, GEMINI_PRIMARY_MODEL } from "./gemini-models";
 export { GEMINI_PRIMARY_MODEL };
 
@@ -28,15 +27,14 @@ export function isThinkingRejection(err: any): boolean {
 }
 
 /**
- * Determines whether the app is running in a native mobile environment (Capacitor/Android/iOS)
+ * Determines whether the app is running in a native mobile environment (Tauri/desktop/iOS)
  * or standalone local WebView without an Express server backend.
  */
 export function isNativeMobileEnvironment(): boolean {
   try {
     if (typeof window === "undefined") return false;
-    if (Capacitor.isNativePlatform()) return true;
     const protocol = window.location?.protocol || "";
-    if (protocol === "capacitor:" || protocol === "file:" || protocol === "ionic:") {
+    if (protocol === "tauri:" || protocol === "file:") {
       return true;
     }
     const host = window.location?.hostname || "";
@@ -59,7 +57,7 @@ export function sanitizeApiKey(rawKey: string): string {
 
 /**
  * Validates a Google Gemini API Key directly against Google's Generative Language REST API.
- * Works natively on Android WebView, iOS, and all modern browsers with zero proxy dependency.
+ * Works natively on desktop WebView, iOS, and all modern browsers with zero proxy dependency.
  */
 export async function validateGeminiKeyDirectly(
   apiKey: string

@@ -1,5 +1,3 @@
-import { Capacitor, registerPlugin } from "@capacitor/core";
-
 export interface UpdateInfo {
   versionCode: number;
   versionName: string;
@@ -45,29 +43,6 @@ export type UpdateCheckResult =
       message: string;
     };
 
-interface NativeAppUpdatePlugin {
-  getAppVersionInfo(): Promise<AppVersion>;
-  showUpdateNotification(options: { versionName: string; versionCode: number }): Promise<{ shown: boolean }>;
-  checkInstallPermission(): Promise<{ canInstall: boolean }>;
-  openInstallPermissionSettings(): Promise<{ success: boolean }>;
-  downloadUpdate(options: {
-    url: string;
-    sha256?: string;
-    versionCode: number;
-  }): Promise<{
-    success: boolean;
-    filePath: string;
-    fileSize: number;
-    sha256: string;
-  }>;
-  installApk(options: { filePath: string }): Promise<{ success: boolean }>;
-  addListener(
-    eventName: "downloadProgress",
-    listenerFunc: (progress: DownloadProgress) => void
-  ): Promise<{ remove: () => Promise<void> }>;
-}
-
-const NativeAppUpdate = registerPlugin<NativeAppUpdatePlugin>("AppUpdate");
 
 const GITHUB_LATEST_RELEASE_API_URL =
   "https://api.github.com/repos/msayed-io/Dar-Al-Hikayat/releases/latest";
@@ -80,45 +55,12 @@ const STORAGE_KEYS = {
   LAST_NOTIFIED_VERSION: "dar_app_last_notified_update_version_code",
 };
 
-export async function notifyUpdateAvailable(updateInfo: UpdateInfo): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return;
-  const lastNotified = Number(localStorage.getItem(STORAGE_KEYS.LAST_NOTIFIED_VERSION) || "0");
-  if (lastNotified === updateInfo.versionCode) return;
-  try {
-    const result = await NativeAppUpdate.showUpdateNotification({
-      versionName: updateInfo.versionName,
-      versionCode: updateInfo.versionCode,
-    });
-    if (result?.shown) {
-      localStorage.setItem(STORAGE_KEYS.LAST_NOTIFIED_VERSION, String(updateInfo.versionCode));
-    }
-  } catch (error) {
-    console.warn("Could not show update notification:", error);
-  }
-}
+export async function notifyUpdateAvailable(updateInfo: UpdateInfo): Promise<void> { localStorage.setItem(STORAGE_KEYS.LAST_NOTIFIED_VERSION, String(updateInfo.versionCode)); }
 
 /**
  * الحصول على بيانات الإصدار الحالي المثبت على الجهاز
  */
-export async function getCurrentAppVersion(): Promise<AppVersion> {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const info = await NativeAppUpdate.getAppVersionInfo();
-      if (info && typeof info.versionCode === "number") {
-        return info;
-      }
-    } catch (err) {
-      console.warn("Could not retrieve native version info:", err);
-    }
-  }
-
-  // Fallback for Web/PWA
-  return {
-    versionCode: 1,
-    versionName: "1.0",
-    packageName: "com.daralhikayat.app",
-  };
-}
+export async function getCurrentAppVersion(): Promise<AppVersion> { return { versionCode: 1, versionName: "1.0", packageName: "com.daralhikayat.desktop" }; }
 
 /**
  * التحقق من وجود تحديث جديد
@@ -307,108 +249,24 @@ export function ignoreUpdateVersion(versionCode: number) {
 /**
  * فحص إذن تثبيت التطبيقات غير المعروفة على أندرويد
  */
-export async function checkInstallPermission(): Promise<boolean> {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const res = await NativeAppUpdate.checkInstallPermission();
-      return !!res?.canInstall;
-    } catch {
-      return true;
-    }
-  }
-  return true;
-}
+export async function checkInstallPermission(): Promise<boolean> { return true; }
 
 /**
  * فتح إعدادات أندرويد لمنح إذن التثبيت
  */
-export async function openInstallSettings(): Promise<void> {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      await NativeAppUpdate.openInstallPermissionSettings();
-    } catch (err) {
-      console.error("Failed to open install permission settings:", err);
-    }
-  }
-}
+export async function openInstallSettings(): Promise<void> {}
 
 /**
  * تنزيل وتثبيت التحديث مع تتبع التقدم والتحقق الأمني
  */
-export async function downloadUpdate(
-  updateInfo: UpdateInfo,
-  onProgress?: (progress: DownloadProgress) => void
-): Promise<{ success: boolean; filePath?: string }> {
-  if (Capacitor.isNativePlatform()) {
-    let progressHandle: { remove: () => Promise<void> } | null = null;
-
-    if (onProgress) {
-      try {
-        progressHandle = await NativeAppUpdate.addListener(
-          "downloadProgress",
-          (p) => {
-            onProgress(p);
-          }
-        );
-      } catch (listenerErr) {
-        console.warn("Could not attach downloadProgress listener:", listenerErr);
-      }
-    }
-
-    try {
-      // 1. Download file and verify SHA-256 on device
-      const downloadResult = await NativeAppUpdate.downloadUpdate({
-        url: updateInfo.downloadUrl,
-        sha256: updateInfo.sha256,
-        versionCode: updateInfo.versionCode,
-      });
-
-      if (!downloadResult || !downloadResult.success || !downloadResult.filePath) {
-        throw new Error("فشل تنزيل ملف التحديث");
-      }
-
-      return { success: true, filePath: downloadResult.filePath };
-    } finally {
-      if (progressHandle) {
-        progressHandle.remove().catch(() => {});
-      }
-    }
-  } else {
-    // Web Preview Simulation
-    let progress = 0;
-    const totalBytes = updateInfo.fileSizeBytes || 15 * 1024 * 1024;
-
-    while (progress < 100) {
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      progress = Math.min(100, progress + 10);
-      if (onProgress) {
-        onProgress({
-          progress,
-          bytesDownloaded: (progress / 100) * totalBytes,
-          totalBytes,
-        });
-      }
-    }
-
-    // Web fallback trigger
-    const downloadUrl = updateInfo.directDownloadUrl || updateInfo.downloadUrl;
-    if (downloadUrl) {
-      const a = document.createElement("a");
-      a.href = downloadUrl;
-      a.download = "dar-al-hikayat.apk";
-      a.target = "_blank";
-      a.click();
-    }
-
-    return { success: true };
-  }
+export async function downloadUpdate(updateInfo: UpdateInfo, onProgress?: (progress: DownloadProgress) => void): Promise<{ success: boolean; filePath?: string }> {
+  onProgress?.({ progress: 100, bytesDownloaded: updateInfo.fileSizeBytes || 0, totalBytes: updateInfo.fileSizeBytes || 0 });
+  const url = updateInfo.directDownloadUrl || updateInfo.downloadUrl;
+  if (url && typeof document !== "undefined") { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; a.click(); }
+  return { success: true };
 }
 
-export async function installDownloadedUpdate(filePath: string): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return;
-  if (!filePath) throw new Error("ملف التحديث غير موجود");
-  await NativeAppUpdate.installApk({ filePath });
-}
+export async function installDownloadedUpdate(_filePath: string): Promise<void> {}
 
 // ─── Global State & Event Dispatcher for in-app Update Prompts ───
 type UpdateDialogListener = (state: {

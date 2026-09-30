@@ -1,5 +1,3 @@
-import { Capacitor, registerPlugin } from "@capacitor/core";
-
 export interface RemoteKeystrokePayload {
   sessionPin: string;
   type: "KEY" | "TASHKEEL" | "COMMAND" | "PASTE_TEXT";
@@ -17,40 +15,13 @@ export interface NetworkIpResult {
   connectionUrl: string;
 }
 
-export interface NativeRemoteServerPlugin {
-  getLocalIpAddress(): Promise<{
-    primaryIp: string;
-    ips: string[];
-    port: number;
-    connectionUrl: string;
-    isNativeServerRunning?: boolean;
-  }>;
-  startServer(): Promise<{ running: boolean; port: number; ip: string }>;
-  stopServer(): Promise<{ running: boolean }>;
-  updateSession(options: { pin: string; connected: boolean }): Promise<{ ok: boolean }>;
-  addListener(
-    eventName: "remoteCommand",
-    listenerFunc: (data: any) => void
-  ): Promise<any>;
-}
-
 // Custom event name for local tab sync (when tested in same browser)
 const LOCAL_BROADCAST_CHANNEL = "dar_remote_keyboard_channel";
-
-// Register native plugin properly via Capacitor's plugin registry
-export const NativeRemoteServer = registerPlugin<NativeRemoteServerPlugin>("RemoteServer");
 
 /**
  * Synchronize session PIN and connected state with the native LocalHttpServer
  */
 export async function updateRemoteSession(pin: string, connected: boolean): Promise<void> {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      await NativeRemoteServer.updateSession({ pin, connected });
-    } catch (e) {
-      console.warn("Failed to update remote session on native server:", e);
-    }
-  }
 }
 
 /**
@@ -61,22 +32,6 @@ export async function getDeviceLocalIp(): Promise<NetworkIpResult> {
   const currentHost = window.location.hostname || "localhost";
 
   // Try Android native plugin first
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const res = await NativeRemoteServer.getLocalIpAddress();
-      if (res && res.primaryIp && res.primaryIp !== "127.0.0.1") {
-        const port = res.port || nativePort;
-        return {
-          primaryIp: res.primaryIp,
-          ips: res.ips || [res.primaryIp],
-          port,
-          connectionUrl: `http://${res.primaryIp}:${port}/`,
-        };
-      }
-    } catch (e) {
-      console.warn("NativeRemoteServer error:", e);
-    }
-  }
 
   // Try Express / Native server IP endpoint
   try {
@@ -217,79 +172,6 @@ export function listenForRemoteKeystrokes(
 
   // 3. Listen via Native Android LocalHttpServer plugin if running natively
   let nativeListenerHandle: any = null;
-  if (Capacitor.isNativePlatform()) {
-    try {
-      NativeRemoteServer.addListener("remoteCommand", (data: any) => {
-        if (isCleanedUp) return;
-
-        // Verify PIN if sessionPin is provided
-        const incomingPin = data.pin || data.sessionPin;
-        if (sessionPin && incomingPin && incomingPin !== sessionPin) {
-          console.warn("Remote keyboard PIN mismatch:", { incomingPin, sessionPin });
-          return;
-        }
-
-        onStatusChange?.(true, "الهاتف متصل بالسيرفر المباشر");
-
-        const action = data.action || data.type || "type";
-        const char = data.char || "";
-        const text = data.text || "";
-
-        let payload: RemoteKeystrokePayload = {
-          sessionPin,
-          type: "KEY",
-          char,
-          timestamp: Date.now(),
-        };
-
-        if (action === "disconnect") {
-          onStatusChange?.(false, "تم قطع الاتصال");
-          return;
-        }
-
-        if (action === "ping") {
-          payload.type = "COMMAND";
-          payload.action = "PING";
-        } else if (action === "tashkeel") {
-          payload.type = "TASHKEEL";
-          payload.char = char;
-        } else if (action === "paste") {
-          payload.type = "PASTE_TEXT";
-          payload.text = text;
-        } else if (action === "backspace") {
-          payload.type = "COMMAND";
-          payload.action = "BACKSPACE";
-        } else if (action === "newline") {
-          payload.type = "COMMAND";
-          payload.action = "NEWLINE";
-        } else if (action === "undo") {
-          payload.type = "COMMAND";
-          payload.action = "UNDO";
-        } else if (action === "redo") {
-          payload.type = "COMMAND";
-          payload.action = "REDO";
-        } else if (action === "cursor_move") {
-          const delta = parseInt(data.delta || "1", 10);
-          payload.type = "COMMAND";
-          payload.action = delta < 0 ? "NAVIGATE_LEFT" : "NAVIGATE_RIGHT";
-        } else if (action === "select_all") {
-          payload.type = "COMMAND";
-          payload.action = "SELECT_ALL";
-        } else {
-          payload.type = "KEY";
-          payload.char = char;
-        }
-
-        onKeystroke(payload);
-      }).then((handle: any) => {
-        nativeListenerHandle = handle;
-      }).catch((e: any) => {
-        console.warn("NativeRemoteServer addListener error:", e);
-      });
-    } catch (e) {
-      console.warn("Native remoteCommand listener error:", e);
-    }
-  }
 
   // 4. Listen via Server-Sent Events (SSE)
   let eventSource: EventSource | null = null;

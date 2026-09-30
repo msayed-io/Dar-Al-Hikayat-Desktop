@@ -9,16 +9,15 @@ import type {
   PrayerState,
   PrayerLocation,
 } from "../lib/prayer-config";
-import { Capacitor } from "@capacitor/core";
-import { App as CapApp } from "@capacitor/app";
 import {
   schedulePrayerAlarms,
-  performSilentResumeLocationRefresh,
+  
   clearAllLocationCache,
   getLastSavedLocation,
   saveSavedLocation,
 } from "../lib/prayer-alarms";
 import { StorageService, NoteMetadata } from "../lib/storage-service";
+import { performSilentResumeLocationRefresh } from "../lib/gps-location";
 import { syncNativeLogoTheme } from "../lib/logo-manager";
 
 export interface NoteStyles {
@@ -360,8 +359,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
 
   // طبقة إضافية: تحديث هادئ عند عودة التطبيق للواجهة (Resume)
   useEffect(() => {
-    let appListenerHandle: { remove: () => Promise<void> } | null = null;
-
     const runSilentResumeUpdate = async () => {
       if (!prayerState.location?.isAutoDetected) return;
       try {
@@ -374,16 +371,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
       }
     };
 
-    if (Capacitor.isNativePlatform()) {
-      CapApp.addListener("appStateChange", (state) => {
-        if (state.isActive) {
-          void runSilentResumeUpdate();
-        }
-      }).then((h) => {
-        appListenerHandle = h;
-      }).catch(() => {});
-    }
-
     const onVisibilityChange = () => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
         void runSilentResumeUpdate();
@@ -395,7 +382,6 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({
     }
 
     return () => {
-      appListenerHandle?.remove();
       if (typeof document !== "undefined") {
         document.removeEventListener("visibilitychange", onVisibilityChange);
       }

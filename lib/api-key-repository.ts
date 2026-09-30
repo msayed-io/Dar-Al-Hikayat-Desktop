@@ -1,4 +1,3 @@
-import { Preferences } from "@capacitor/preferences";
 import {
   validateGeminiKeyDirectly,
   sanitizeApiKey,
@@ -22,7 +21,7 @@ const STORAGE_SALT = "DarAlHikayat_RahmaMowafi_SecureKeyStorage_2026";
 const CHANGE_EVENT_NAME = "dar_api_keys_changed";
 
 /**
- * Obfuscates/encrypts the raw string before saving to local storage / Preferences.
+ * Obfuscates/encrypts the raw string before saving to local storage / browser storage.
  */
 function encryptData(text: string): string {
   try {
@@ -118,57 +117,19 @@ export function getManagedKeys(): ManagedApiKey[] {
 }
 
 /**
- * Loads keys asynchronously from Capacitor Preferences (backed by Android SharedPreferences)
+ * Loads keys asynchronously from Tauri browser storage (backed by desktop Sharedbrowser storage)
  * and keeps localStorage and memory in sync.
  */
 export async function loadManagedKeysAsync(): Promise<ManagedApiKey[]> {
-  try {
-    const result = await Preferences.get({ key: STORAGE_KEY });
-    if (result.value) {
-      const decrypted = decryptData(result.value);
-      if (decrypted) {
-        const parsed = JSON.parse(decrypted);
-        if (Array.isArray(parsed)) {
-          inMemoryKeys = parsed;
-          if (typeof window !== "undefined") {
-            localStorage.setItem(STORAGE_KEY, result.value);
-          }
-          return inMemoryKeys;
-        }
-      }
-    }
-  } catch (err) {
-    console.warn("Capacitor Preferences load error, falling back to local:", err);
-  }
-
   return getManagedKeys();
 }
 
-/**
- * Persists keys securely to both in-memory cache, localStorage, and Capacitor Preferences.
- */
 async function persistKeys(keys: ManagedApiKey[]): Promise<void> {
   inMemoryKeys = [...keys];
-  const serialized = JSON.stringify(keys);
-  const encrypted = encryptData(serialized);
-
+  const encrypted = encryptData(JSON.stringify(keys));
   if (typeof window !== "undefined") {
-    try {
-      localStorage.setItem(STORAGE_KEY, encrypted);
-    } catch (e) {
-      console.warn("Failed to write keys to localStorage:", e);
-    }
+    try { localStorage.setItem(STORAGE_KEY, encrypted); } catch (e) { console.warn("Failed to write keys to localStorage:", e); }
   }
-
-  try {
-    await Preferences.set({
-      key: STORAGE_KEY,
-      value: encrypted,
-    });
-  } catch (e) {
-    console.warn("Failed to write keys to Capacitor Preferences:", e);
-  }
-
   notifyKeyChangeListeners();
 }
 
@@ -207,7 +168,7 @@ export async function addManagedKey(
 
 /**
  * Validates whether an API key connects and functions successfully with the Gemini API.
- * Supports direct Google Generative Language verification (for Android/mobile/web) and server proxy fallback.
+ * Supports direct Google Generative Language verification (for desktop/mobile/web) and server proxy fallback.
  */
 export async function testKeyConnection(
   apiKey: string
@@ -220,7 +181,7 @@ export async function testKeyConnection(
     };
   }
 
-  // 1. Direct validation against Google Generative Language API (works 100% on Native Android and Web)
+  // 1. Direct validation against Google Generative Language API (works 100% on Native desktop and Web)
   const directResult = await validateGeminiKeyDirectly(cleanKey);
   if (directResult.valid) {
     return {

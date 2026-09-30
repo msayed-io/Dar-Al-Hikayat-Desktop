@@ -1,5 +1,3 @@
-import { Capacitor } from "@capacitor/core";
-import { SQLiteConnection, CapacitorSQLite } from "@capacitor-community/sqlite";
 import localforage from "localforage";
 
 export interface NoteMetadata {
@@ -124,104 +122,15 @@ function generateUniqueStoryId(): number {
 }
 
 class StorageServiceManager {
-  private sqliteConnection: SQLiteConnection | null = null;
   private db: any = null;
   private isNativeSQLite = false;
   private isInitialized = false;
 
   async init(): Promise<void> {
     if (this.isInitialized) return;
-
-    if (Capacitor.isNativePlatform()) {
-      try {
-        this.sqliteConnection = new SQLiteConnection(CapacitorSQLite);
-        const ret = await this.sqliteConnection.checkConnectionsConsistency();
-        const isConn = (await this.sqliteConnection.isConnection("dar_alhikayat_db", false)).result;
-        
-        if (ret.result && isConn) {
-          this.db = await this.sqliteConnection.retrieveConnection("dar_alhikayat_db", false);
-        } else {
-          this.db = await this.sqliteConnection.createConnection(
-            "dar_alhikayat_db",
-            false,
-            "no-encryption",
-            1,
-            false
-          );
-        }
-
-        await this.db.open();
-        
-        // Create tables (no user data in statements; execute is used safely with ; \n separator)
-        const createTablesQuery = `
-          CREATE TABLE IF NOT EXISTS stories (
-            id INTEGER PRIMARY KEY,
-            title TEXT NOT NULL,
-            preview TEXT,
-            date TEXT,
-            category TEXT,
-            styles TEXT,
-            is_locked INTEGER DEFAULT 0,
-            password TEXT,
-            word_count INTEGER DEFAULT 0,
-            char_count INTEGER DEFAULT 0,
-            updated_at INTEGER,
-            created_at INTEGER
-          );
-          CREATE TABLE IF NOT EXISTS story_bodies (
-            story_id INTEGER PRIMARY KEY REFERENCES stories(id) ON DELETE CASCADE,
-            html TEXT NOT NULL
-          );
-          CREATE TABLE IF NOT EXISTS app_meta (
-            key TEXT PRIMARY KEY,
-            value TEXT
-          );
-        `;
-        await this.db.execute(createTablesQuery);
-
-        // Check if existing stories_fts was created with content=''
-        try {
-          const ftsTableInfo = await this.db.query(
-            "SELECT sql FROM sqlite_master WHERE name='stories_fts';"
-          );
-          if (
-            ftsTableInfo.values &&
-            ftsTableInfo.values.length > 0 &&
-            (ftsTableInfo.values[0].sql || "").includes("content=''")
-          ) {
-            console.log("Migrating legacy contentless FTS5 table to standard FTS5...");
-            await this.db.execute(`
-              DROP TABLE IF EXISTS stories_fts;
-              CREATE VIRTUAL TABLE stories_fts USING fts5(
-                title, body, tokenize='unicode61 remove_diacritics 2'
-              );
-            `);
-            await this.db.run("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('fts_v2_migrated', 'true');");
-            await this.db.run("DELETE FROM app_meta WHERE key = 'fts_backfilled_v2';");
-          } else {
-            await this.db.execute(`
-              CREATE VIRTUAL TABLE IF NOT EXISTS stories_fts USING fts5(
-                title, body, tokenize='unicode61 remove_diacritics 2'
-              );
-            `);
-          }
-        } catch (e) {
-          console.warn("FTS5 table initialization / migration warning (non-fatal):", e);
-        }
-
-        this.isNativeSQLite = true;
-      } catch (err) {
-        console.warn("Capacitor SQLite init fallback to IndexedDB:", err);
-        this.isNativeSQLite = false;
-      }
-    } else {
-      this.isNativeSQLite = false;
-    }
-
+    this.isNativeSQLite = false;
     this.isInitialized = true;
-    // Run migration & backfill asynchronously without blocking initial load
     this.migrateLegacyDataIfNeeded().catch((e) => console.warn("Migration warning:", e));
-    this.backfillFtsIfNeeded().catch((e) => console.warn("FTS backfill warning:", e));
   }
 
   public async backfillFtsIfNeeded(): Promise<void> {

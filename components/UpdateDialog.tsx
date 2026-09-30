@@ -25,7 +25,6 @@ import {
   checkInstallPermission,
   openInstallSettings,
 } from "../lib/app-updater";
-import { Capacitor } from "@capacitor/core";
 
 export const UpdateDialog: React.FC = () => {
   const { currentTheme } = useApp();
@@ -95,14 +94,6 @@ export const UpdateDialog: React.FC = () => {
       return;
     }
 
-    // Check Android unknown sources permission first if native
-    if (Capacitor.isNativePlatform()) {
-      const hasPermission = await checkInstallPermission();
-      if (!hasPermission) {
-        setStep("permission_required");
-        return;
-      }
-    }
 
     setStep("downloading");
     setErrorMessage(null);
