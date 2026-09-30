@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { motion, AnimatePresence } from "motion/react";
 import { BookOpen, Compass, Plus, Feather } from "lucide-react";
 import DarAlHikayatMaster from "./components/DarAlHikayatEditor";
@@ -402,6 +403,14 @@ const BiometricGuard: React.FC<{ children: React.ReactNode }> = ({
 // The root component that wraps everything with the provider
 function App() {
   const [showSplash, setShowSplash] = useState(true);
+
+  // The native window stays hidden until React has mounted the real app.
+  // This prevents WebView2's transient ERR_FAILED page from ever being shown.
+  useEffect(() => {
+    if (window.location.hostname === "tauri.localhost") {
+      void getCurrentWindow().show();
+    }
+  }, []);
 
   // Standalone Mobile Remote Keyboard View
   const isRemoteKeyboard =
