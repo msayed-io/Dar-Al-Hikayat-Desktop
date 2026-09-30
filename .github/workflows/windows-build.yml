@@ -1,0 +1,88 @@
+name: Build Dar Al-Hikayat Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: "Build configuration"
+        required: true
+        type: choice
+        options:
+          - release
+        default: release
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dar-al-hikayat-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+
+jobs:
+  validate:
+    name: Validate web application
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Unit tests
+        run: npm test -- --run
+      - name: Web production build
+        run: npm run build
+
+  build-windows:
+    name: Build Windows EXE and MSI
+    needs: validate
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Setup Rust stable MSVC
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify Tauri CLI
+        run: npx tauri --version
+      - name: Build Tauri Windows packages
+        run: npx tauri build
+      - name: Verify generated installers
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -File
+          $msi = Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Filter "*.msi" -File
+          if (-not $exe) { throw "No Windows EXE installer was generated." }
+          if (-not $msi) { throw "No Windows MSI installer was generated." }
+          $exe | Select-Object FullName, Length
+          $msi | Select-Object FullName, Length
+      - name: Upload Windows installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: dar-al-hikayat-windows-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
