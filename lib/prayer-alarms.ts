@@ -1,9 +1,10 @@
 /** Native Tauri/Web prayer notifications and location helpers. */
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
+import { invoke } from "@tauri-apps/api/core";
 import type { PrayerLocation, CalculationMethodId } from "./prayer-config";
 import type { CityData } from "./prayer-cities";
 import { PRAYER_DEFINITIONS } from "./prayer-config";
-import { getTodayAndTomorrow } from "./prayer-times";
+import { getDayPrayers, getTodayAndTomorrow, getPrayerInstant } from "./prayer-times";
 import { autoDetectLocation as detectLocation, getLastSavedLocation, clearAllLocationCache, saveSavedLocation, guessTimezone } from "./gps-location";
 
 const PRAYER_SETTINGS_KEY = "dar_prayer_settings";
@@ -71,7 +72,7 @@ export function loadPrayerSettings(): StoredPrayerSettings {
 }
 export function savePrayerSettings(s: StoredPrayerSettings): void { try { localStorage.setItem(PRAYER_SETTINGS_KEY, JSON.stringify(s)); } catch {} }
 
-/** Schedules the next two days while the installed desktop process is running. */
+/** Schedules exact prayer instants through Windows Task Scheduler when installed. */
 export async function schedulePrayerAlarms(location: PrayerLocation, method: CalculationMethodId): Promise<boolean> {
   const generation = ++scheduleGeneration;
   clearScheduledTimers();
@@ -79,26 +80,48 @@ export async function schedulePrayerAlarms(location: PrayerLocation, method: Cal
   if (!permissionGranted) return false;
 
   const preferences = loadAlarmPreferences();
-  const { today, tomorrow } = getTodayAndTomorrow(location.latitude, location.longitude, method, location.timezoneId);
   const now = Date.now();
-  const upcoming = [...today.prayers, ...tomorrow.prayers]
-    .filter((prayer) => PRAYER_IDS.includes(prayer.prayerId as (typeof PRAYER_IDS)[number]))
-    .filter((prayer) => preferences[prayer.prayerId] !== false && prayer.time.getTime() > now)
-    .sort((a, b) => a.time.getTime() - b.time.getTime());
+  const days = Array.from({ length: 45 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() + index);
+    return getDayPrayers(location.latitude, location.longitude, date, method, location.timezoneId);
+  });
+  const upcoming = days.flatMap((day) =>
+    day.prayers
+      .filter((prayer) => PRAYER_IDS.includes(prayer.prayerId as (typeof PRAYER_IDS)[number]))
+      .filter((prayer) => preferences[prayer.prayerId] !== false)
+      .map((prayer) => ({ day, prayer, instant: getPrayerInstant(prayer, day.date, location.timezoneId) }))
+  ).filter((item) => item.instant.getTime() > now)
+    .sort((a, b) => a.instant.getTime() - b.instant.getTime());
 
-  for (const prayer of upcoming) {
-    const delay = prayer.time.getTime() - now;
-    const key = `${prayer.prayerId}:${prayer.time.toISOString()}`;
+  if (isTauriDesktop()) {
+    try {
+      const tasks = upcoming.map(({ day, prayer, instant }) => ({
+        date: day.date,
+        prayerId: prayer.prayerId,
+        // Task Scheduler accepts the interactive user's local wall-clock time.
+        year: instant.getFullYear(),
+        month: instant.getMonth() + 1,
+        day: instant.getDate(),
+        hour: instant.getHours(),
+        minute: instant.getMinutes(),
+      }));
+      await invoke<number>("sync_windows_prayer_tasks", { tasks });
+      return true;
+    } catch (error) {
+      console.warn("Windows Task Scheduler registration failed; using in-process fallback.", error);
+    }
+  }
+
+  // Browser fallback, and a safe fallback if Task Scheduler is unavailable.
+  for (const { prayer, instant } of upcoming.slice(0, 2)) {
+    const key = `${prayer.prayerId}:${instant.toISOString()}`;
     scheduledTimers.set(key, setTimeout(async () => {
       if (generation !== scheduleGeneration) return;
       try { await emitPrayerNotification(prayer.prayerId, location); }
       catch (error) { console.warn("Prayer notification delivery failed.", error); }
       await schedulePrayerAlarms(location, method);
-    }, Math.min(delay, 2_147_000_000)));
-  }
-
-  if (upcoming.length === 0) {
-    scheduledTimers.set("refresh", setTimeout(() => void schedulePrayerAlarms(location, method), 60_000));
+    }, Math.max(0, Math.min(instant.getTime() - now, 2_147_000_000))));
   }
   return true;
 }

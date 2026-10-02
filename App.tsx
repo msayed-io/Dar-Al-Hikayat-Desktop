@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { motion, AnimatePresence } from "motion/react";
 import { BookOpen, Compass, Plus, Feather } from "lucide-react";
 import DarAlHikayatMaster from "./components/DarAlHikayatEditor";
@@ -419,7 +420,15 @@ function App() {
   // This prevents WebView2's transient ERR_FAILED page from ever being shown.
   useEffect(() => {
     if (window.location.hostname === "tauri.localhost") {
-      void getCurrentWindow().show();
+      void invoke<boolean>("is_silent_process").then((silentProcess) => {
+        if (!silentProcess) {
+          void getCurrentWindow().show();
+          return;
+        }
+        void invoke<boolean>("is_prayer_refresh_process").then((refreshProcess) => {
+          if (refreshProcess) window.setTimeout(() => void invoke("exit_silent_process"), 15_000);
+        });
+      });
     }
   }, []);
 

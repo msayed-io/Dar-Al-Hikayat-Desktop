@@ -21,6 +21,36 @@ export interface DailyPrayers {
   prayers: TimedPrayer[];
 }
 
+/** Converts a prayer's local wall-clock date/time in the selected timezone to an instant. */
+export function getPrayerInstant(prayer: TimedPrayer, date: string, timezoneId: string): Date {
+  const [year, month, day] = date.split("-").map(Number);
+  const minutes = prayer.minutesFromMidnight;
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const wallClockUtc = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+
+  const offsetAt = (instantMs: number): number => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezoneId,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date(instantMs));
+    const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+    const localAsUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") === 24 ? 0 : get("hour"), get("minute"), get("second"));
+    return Math.round((localAsUtc - instantMs) / 60000);
+  };
+
+  let instantMs = wallClockUtc;
+  instantMs = wallClockUtc - offsetAt(instantMs) * 60000;
+  instantMs = wallClockUtc - offsetAt(instantMs) * 60000;
+  return new Date(instantMs);
+}
+
 /** خريطة طرق الحساب إلى بارامترات adhan (كما في الإنتاج) */
 function methodParams(method: CalculationMethodId) {
   switch (method) {
