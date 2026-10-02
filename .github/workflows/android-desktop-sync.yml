@@ -1,0 +1,109 @@
+name: Review Android changes for Desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_ref:
+        description: "Android branch, tag, or commit to inspect"
+        required: true
+        default: main
+        type: string
+      create_pr:
+        description: "Create a Desktop PR for safe shared-file changes"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: android-desktop-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  ANDROID_REPOSITORY: msayed-io/Dar-Al-Hikayat
+
+jobs:
+  review-and-sync:
+    name: Review Android source without modifying Android
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Desktop
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout Android read-only source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ env.ANDROID_REPOSITORY }}
+          ref: ${{ inputs.android_ref }}
+          path: android-source-readonly
+          fetch-depth: 1
+
+      - name: Run protected sync review
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/sync_android_shared.py \
+            --source android-source-readonly \
+            --target . \
+            --report android-desktop-sync-report.json \
+            --apply-safe
+
+      - name: Publish sync report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-desktop-sync-report-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: android-desktop-sync-report.json
+
+      - name: Create Desktop-only review branch and PR
+        if: ${{ inputs.create_pr == true && hashFiles('android-desktop-sync-report.json') != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          safe_count=$(python3 -c 'import json; print(len(json.load(open("android-desktop-sync-report.json"))["safe_changes"]))')
+          if [ "$safe_count" -eq 0 ]; then
+            echo "No safe shared changes detected; no PR will be created."
+            exit 0
+          fi
+          branch="sync/android-shared-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -A -- ':!android-source-readonly' ':!android-desktop-sync-report.json'
+          git commit -m "sync: review safe shared changes from Android"
+          git push --set-upstream origin "$branch"
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$branch" \
+            --title "sync: review shared Android changes for Desktop" \
+            --body "Automated Desktop-only review from Android ref `${{ inputs.android_ref }}`. Android was checked out read-only and was not modified. Protected/native files are excluded; review the generated diff before merging."
+
+      - name: Explain protected changes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          report = json.load(open('android-desktop-sync-report.json', encoding='utf-8'))
+          protected = report['protected_changes_manual_port_required']
+          rejected = report['rejected_changes']
+          print(f"Android source SHA: {report['android_sha']}")
+          print(f"Changed common files: {len(report['changed_common_files'])}")
+          print(f"Safe shared changes: {len(report['safe_changes'])}")
+          print(f"Protected/manual files: {len(protected)}")
+          print(f"Rejected files: {len(rejected)}")
+          if protected:
+              print("Protected files require manual Desktop porting:")
+              print("\n".join(f"- {p}" for p in protected))
+          if rejected:
+              print("Rejected files were not copied:")
+              print("\n".join(f"- {p}" for p in rejected))
+          PY
