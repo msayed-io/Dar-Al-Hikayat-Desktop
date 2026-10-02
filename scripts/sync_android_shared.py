@@ -18,7 +18,18 @@ from pathlib import Path
 
 SAFE_SHARED_PATHS = {
     "components/HomePage.tsx",
+    "components/DarAlHikayatEditor.tsx",
+    "components/DarAlHikayatHandwriting.tsx",
     "index.css",
+    "lib/handwriting-eraser.ts",
+    "lib/logo-assets.ts",
+    "tests/handwriting-canvas-resize.test.tsx",
+    "tests/handwriting-eraser.test.ts",
+}
+SAFE_BINARY_PATHS = {
+    "public/dar-al-hikayat-logo-transparent-apple_dark.png",
+    "public/dar-al-hikayat-logo-transparent-night_whisper.png",
+    "public/dar-al-hikayat-logo-transparent-royal_classic.png",
 }
 PROTECTED_PREFIXES = (
     "src-tauri/",
@@ -85,19 +96,26 @@ def main() -> int:
     protected_changes: list[str] = []
     rejected_changes: list[str] = []
 
-    common_files = set()
+    candidate_files = set()
     for root in (source, target):
         for file in root.rglob("*"):
             if file.is_file() and ".git" not in file.parts and "node_modules" not in file.parts:
-                common_files.add(file.relative_to(root).as_posix())
+                candidate_files.add(file.relative_to(root).as_posix())
 
-    for rel in sorted(common_files):
+    for rel in sorted(candidate_files):
+        if rel.startswith(("android/", "dist/", "src-tauri/target/", "node_modules/")):
+            continue
         src = source / rel
         dst = target / rel
-        if not src.is_file() or not dst.is_file() or sha256(src) == sha256(dst):
+        if not src.is_file() or (dst.is_file() and sha256(src) == sha256(dst)):
             continue
         changed.append(rel)
-        if rel in SAFE_SHARED_PATHS:
+        if rel in SAFE_BINARY_PATHS:
+            safe_changes.append(rel)
+            if args.apply_safe:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+        elif rel in SAFE_SHARED_PATHS:
             try:
                 text = src.read_text(encoding="utf-8")
             except UnicodeDecodeError:

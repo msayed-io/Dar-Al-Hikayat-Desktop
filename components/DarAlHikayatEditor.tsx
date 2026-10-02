@@ -60,7 +60,7 @@ import {
   PageBreak,
 } from "docx";
 import { useApp, NoteStyles } from "../contexts/AppContext";
-import { logoAsset } from "../lib/logo-assets";
+import { logoAsset, logoTransparentAsset } from "../lib/logo-assets";
 import { exportStoryToPdf, downloadBlob } from "../lib/pdf-export";
 import { exportStoryToDocx } from "../lib/docx-export";
 import DarAlHikayatAIAssistant from "./DarAlHikayatAIAssistant";
@@ -2961,7 +2961,7 @@ const DarAlHikayatMaster: React.FC = () => {
             : "apple-top-vignette"
         }`}
         style={{
-          opacity: showUI ? 1 : 0,
+          opacity: showUI && !isHandwritingMode ? 1 : 0,
           right: showAIAssistant && isWideScreen ? paneWidthCss : 0,
         }}
       />
@@ -2970,7 +2970,7 @@ const DarAlHikayatMaster: React.FC = () => {
       <div
         className="apple-magnetic-dissolve"
         style={{
-          opacity: showUI ? 1 : 0,
+          opacity: showUI && !isHandwritingMode ? 1 : 0,
           right: showAIAssistant && isWideScreen ? paneWidthCss : 0,
         }}
       />
@@ -3493,7 +3493,12 @@ const DarAlHikayatMaster: React.FC = () => {
       )}
 
       {/* Main Content Area & AI Assistant Dual Pane Split Screen */}
-      <div className="w-full min-h-screen relative overflow-x-hidden" dir="rtl">
+      <div
+        className={`w-full min-h-screen relative overflow-x-hidden ${
+          isHandwritingMode && !isSavedMode ? "hidden" : ""
+        }`}
+        dir="rtl"
+      >
         {/* AI Assistant Studio Pane: Completely fixed to the viewport - 100% immune to editor scrolling or text length */}
         {showAIAssistant && isWideScreen && (
           <aside
@@ -3537,33 +3542,7 @@ const DarAlHikayatMaster: React.FC = () => {
             minWidth: 0,
           }}
         >
-          {/* Handwriting & Inking Canvas Layer */}
-          <DarAlHikayatHandwriting
-            ref={handwritingRef}
-            isActive={isHandwritingMode && !isSavedMode}
-            isReadingMode={isSavedMode}
-            onClose={() => setIsHandwritingMode(false)}
-            onDiscard={() => {
-              setHandwritingStrokes([]);
-              setHandwritingDataUrl("");
-              setIsPageRuled(false);
-              setIsHandwritingMode(false);
-              setIsDirty(true);
-              if (noteId) {
-                try {
-                  localStorage.removeItem(`dar_hw_${noteId}`);
-                } catch {}
-              }
-            }}
-            theme={currentTheme}
-            initialStrokes={handwritingStrokes}
-            initialPageRuled={isPageRuled}
-            onStrokesChange={handleHandwritingChange}
-            onUndoChange={(canUndo, canRedo) => {
-              setHandwritingCanUndo(canUndo);
-              setHandwritingCanRedo(canRedo);
-            }}
-          />
+
 
           <main
             id="story-content"
@@ -3763,10 +3742,10 @@ const DarAlHikayatMaster: React.FC = () => {
               >
                 <img
                   src={
-                    logoAsset(currentTheme.mode)
+                    logoTransparentAsset(currentTheme.mode)
                   }
                   alt="أدوات"
-                  className="w-5 h-5 object-contain transition-transform duration-300"
+                  className="w-6 h-6 object-contain transition-transform duration-300"
                   style={{
                     transform: showControls ? "rotate(-10deg)" : "rotate(0)",
                   }}
@@ -4317,6 +4296,35 @@ const DarAlHikayatMaster: React.FC = () => {
           </span>
         </button>
       )}
+
+      {/* Handwriting & Inking Canvas Layer (Root-Level Viewport Placement at End of DOM Tree) */}
+      <DarAlHikayatHandwriting
+        ref={handwritingRef}
+        isActive={isHandwritingMode && !isSavedMode}
+        isReadingMode={isSavedMode}
+        onClose={() => setIsHandwritingMode(false)}
+        onDiscard={() => {
+          setHandwritingStrokes([]);
+          setHandwritingDataUrl("");
+          setIsPageRuled(false);
+          setIsHandwritingMode(false);
+          setIsDirty(true);
+          if (noteId) {
+            try {
+              localStorage.removeItem(`dar_hw_${noteId}`);
+            } catch {}
+          }
+        }}
+        theme={currentTheme}
+        initialStrokes={handwritingStrokes}
+        initialPageRuled={isPageRuled}
+        onStrokesChange={handleHandwritingChange}
+        onUndoChange={(canUndo, canRedo) => {
+          setHandwritingCanUndo(canUndo);
+          setHandwritingCanRedo(canRedo);
+        }}
+        title={title}
+      />
 
       {/* Remote Novel Writer Keyboard Modal */}
       <RemoteKeyboardModal
