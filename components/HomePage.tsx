@@ -46,6 +46,8 @@ import { playStoryDissolve, playStoryDissolveBatch } from "../lib/story-dissolve
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { downloadBlob } from "../lib/pdf-export";
 import { ImportResultModal, type FailedImportItem } from "./ImportResultModal";
+import { HandwritingPreview } from "./HandwritingPreview";
+import { hasHandwritingInk } from "../lib/handwriting-document";
 
 const HomePage: React.FC = () => {
   const {
@@ -1606,6 +1608,13 @@ const HomePage: React.FC = () => {
                                 حكاية مغلقة بأمر الكاتب
                               </p>
                             </div>
+                          ) : (hasHandwritingInk(note.styles?.handwriting?.strokes) || (!note.styles?.handwriting?.strokes?.length && Boolean(note.styles?.handwriting?.dataUrl))) ? (
+                            <HandwritingPreview
+                              strokes={note.styles?.handwriting?.strokes}
+                              dataUrl={note.styles?.handwriting?.dataUrl}
+                              theme={currentTheme}
+                              grid={viewMode === "grid"}
+                            />
                           ) : (
                             <p
                               className={`text-sm leading-relaxed font-zain-reg mb-3 break-words overflow-hidden text-ellipsis ${viewMode === "grid" ? "line-clamp-3" : "line-clamp-2"}`}

@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback, useImperativeHandle, forwardRef } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronUp, ChevronRight, MoreHorizontal, Eraser as EraserIcon, Trash2, XCircle, Check, Undo2, Redo2 } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronRight, MoreHorizontal, Eraser as EraserIcon, Trash2, XCircle, Check, Undo2, Redo2, PenTool } from "lucide-react";
 import { ThemeColors } from "../contexts/AppContext";
 import { eraseStrokePortion } from "../lib/handwriting-eraser";
+import { hasHandwritingInk, type HandwritingSaveResult } from "../lib/handwriting-document";
 
 export interface StrokePoint {
   x: number;
@@ -21,6 +22,7 @@ export interface Stroke {
 export interface HandwritingHandle {
   getStrokes: () => Stroke[];
   getDataUrl: () => string;
+  getPageRuled: () => boolean;
   clear: () => void;
   undo: () => void;
   redo: () => void;
@@ -32,6 +34,11 @@ interface DarAlHikayatHandwritingProps {
   isActive: boolean;
   isReadingMode?: boolean;
   onClose: () => void;
+  onSave?: () => Promise<HandwritingSaveResult>;
+  onTitleChange?: (title: string) => void;
+  onReturnToEdit?: () => void;
+  isSaving?: boolean;
+  isDirty?: boolean;
   onDiscard?: () => void;
   theme: ThemeColors;
   initialStrokes?: Stroke[];
@@ -65,9 +72,10 @@ const COLOR_PALETTE = [
 ];
 
 type PopupType = "none" | "thickness" | "color" | "options" | "eraser";
+const EMPTY_STROKES: Stroke[] = [];
 
 export const DarAlHikayatHandwriting = forwardRef<HandwritingHandle, DarAlHikayatHandwritingProps>(
-  ({ isActive, isReadingMode = false, onClose, onDiscard, theme, initialStrokes = [], initialPageRuled = false, onStrokesChange, containerRef, onUndoChange, backgroundStyle, title }, ref) => {
+  ({ isActive, isReadingMode = false, onClose, onSave, onTitleChange, onReturnToEdit, isSaving = false, isDirty = false, onDiscard, theme, initialStrokes = EMPTY_STROKES, initialPageRuled = false, onStrokesChange, containerRef, onUndoChange, backgroundStyle, title }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const ruledCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -89,6 +97,29 @@ export const DarAlHikayatHandwriting = forwardRef<HandwritingHandle, DarAlHikaya
 
     // Collapsed Capsule Dome State (Minimize/Expand)
     const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
+
+    // Document actions are separate from the confirmed inking/eraser pipeline.
+    const [isEditingTitle, setIsEditingTitle] = useState(false);
+    const [saveWarning, setSaveWarning] = useState<string | null>(null);
+    const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const returnToEditRef = useRef(onReturnToEdit);
+    returnToEditRef.current = onReturnToEdit;
+
+    useEffect(() => () => {
+      if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+    }, []);
+
+    const handleSaveClick = async () => {
+      if (isSaving || !onSave) return;
+      (document.activeElement as HTMLElement)?.blur?.();
+      const result = await onSave();
+      if (result !== "empty" && result !== "failed") return;
+      setSaveWarning(result === "empty"
+        ? "لا يمكن حفظ حكاية فارغة! ارسم بيدك أو اكتب عنواناً أولاً."
+        : "تعذر الحفظ. رسوماتك ما زالت هنا؛ حاول مرة أخرى.");
+      if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
+      warningTimerRef.current = setTimeout(() => setSaveWarning(null), 3000);
+    };
 
     // Active popup capsule above bottom bar
     const [activePopup, setActivePopup] = useState<PopupType>("none");
@@ -121,9 +152,8 @@ export const DarAlHikayatHandwriting = forwardRef<HandwritingHandle, DarAlHikaya
     const selectedColorRef = useRef<string>(theme.isDark ? "#FFFFFF" : "#121A1B");
     const strokesRef = useRef<Stroke[]>(initialStrokes);
 
-    // Throttled Redraw RAF & Debounced DataURL Refs
+    // Throttled redraw: preview serialization never runs in the drawing loop.
     const redrawRafIdRef = useRef<number | null>(null);
-    const dataUrlTimeoutRef = useRef<any>(null);
 
     // Spatial index of stroke bounding boxes for 100x faster O(1) eraser culling
     const strokeBoundsRef = useRef<Map<string, { minX: number; maxX: number; minY: number; maxY: number }>>(new Map());
@@ -235,10 +265,6 @@ export const DarAlHikayatHandwriting = forwardRef<HandwritingHandle, DarAlHikaya
         if (redrawRafIdRef.current !== null) {
           cancelAnimationFrame(redrawRafIdRef.current);
           redrawRafIdRef.current = null;
-        }
-        if (dataUrlTimeoutRef.current) {
-          clearTimeout(dataUrlTimeoutRef.current);
-          dataUrlTimeoutRef.current = null;
         }
       };
     }, []);
@@ -365,30 +391,44 @@ export const DarAlHikayatHandwriting = forwardRef<HandwritingHandle, DarAlHikaya
       drawRuledLines(panYRef.current);
     }, [drawRuledLines, isPageRuled]);
 
+    // A mode transition can keep the same canvas node and size. Repaint its
+    // viewport explicitly, without changing the sizing or coordinate pipeline.
+    useEffect(() => {
+      if (!isActive && !isReadingMode) return;
+      if (isReadingMode) {
+        let firstY = Infinity;
+        for (const stroke of strokesRef.current) {
+          for (const point of stroke.points) {
+            if (Number.isFinite(point.y)) firstY = Math.min(firstY, point.y);
+          }
+        }
+        // Reopened pages start at their first ink, even if it was drawn far down.
+        const start = Number.isFinite(firstY) && firstY >= window.innerHeight - 96
+          ? Math.max(0, firstY - 112) : 0;
+        panYRef.current = start;
+        setPanY(start);
+      }
+      redrawAll(strokesRef.current, panYRef.current);
+      drawRuledLines(panYRef.current);
+    }, [isActive, isReadingMode, redrawAll, drawRuledLines]);
+
     // Export current canvas as data URL on-demand
     const generateDataUrl = useCallback(() => {
       const canvas = canvasRef.current;
-      if (!canvas) return "";
+      if (!canvas || !hasHandwritingInk(strokesRef.current)) return "";
+      // Explicit save only: flush a pending eraser repaint before snapshotting.
+      redrawAll(strokesRef.current, panYRef.current);
       return canvas.toDataURL("image/png");
+    }, [redrawAll]);
+
+    // Vectors are authoritative. A delayed PNG callback used to resurrect stale
+    // drafts after save/discard, mark saved notes dirty, and "save" empty canvases.
+    // The image is generated only on explicit save; cards preview the vectors.
+    const onStrokesChangeRef = useRef(onStrokesChange);
+    onStrokesChangeRef.current = onStrokesChange;
+    const notifyChange = useCallback((newStrokes: Stroke[], ruled: boolean) => {
+      onStrokesChangeRef.current?.(newStrokes, ruled, "");
     }, []);
-
-    // Save strokes state to parent without blocking the main UI thread with heavy base64 serialization
-    const notifyChange = useCallback(
-      (newStrokes: Stroke[], ruled: boolean) => {
-        if (onStrokesChange) {
-          onStrokesChange(newStrokes, ruled, "");
-
-          if (dataUrlTimeoutRef.current) clearTimeout(dataUrlTimeoutRef.current);
-          dataUrlTimeoutRef.current = setTimeout(() => {
-            if (canvasRef.current && onStrokesChange) {
-              const url = canvasRef.current.toDataURL("image/png");
-              onStrokesChange(newStrokes, ruled, url);
-            }
-          }, 800);
-        }
-      },
-      [onStrokesChange]
-    );
 
     // Notify undo/redo availability to parent
     useEffect(() => {
@@ -826,6 +866,45 @@ export const DarAlHikayatHandwriting = forwardRef<HandwritingHandle, DarAlHikaya
       };
     }, [isActive, isReadingMode, scheduleRedraw, drawRuledLines]);
 
+    // Reading taps must originate on THIS canvas, not on a header/modal button.
+    // Horizontal drags, multi-touch, cancellation and scrolling never enter edit.
+    useEffect(() => {
+      if (!isReadingMode || !canvasNode) return;
+      let tap: { id: number; x: number; y: number; valid: boolean } | null = null;
+      const down = (event: PointerEvent) => {
+        if (tap) { tap.valid = false; return; }
+        tap = { id: event.pointerId, x: event.clientX, y: event.clientY, valid: true };
+      };
+      const move = (event: PointerEvent) => {
+        if (tap?.id === event.pointerId && Math.hypot(event.clientX - tap.x, event.clientY - tap.y) > 6) {
+          tap.valid = false;
+        }
+      };
+      const up = (event: PointerEvent) => {
+        if (!tap || tap.id !== event.pointerId) return;
+        const rect = canvasNode.getBoundingClientRect();
+        const isTap = tap.valid && event.type === "pointerup"
+          && Math.hypot(event.clientX - tap.x, event.clientY - tap.y) <= 6
+          && event.clientX >= rect.left && event.clientX <= rect.right
+          && event.clientY >= rect.top && event.clientY <= rect.bottom;
+        tap = null;
+        if (isTap) returnToEditRef.current?.();
+      };
+      const cancel = () => { tap = null; };
+      canvasNode.addEventListener("pointerdown", down);
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", cancel);
+      window.addEventListener("blur", cancel);
+      return () => {
+        canvasNode.removeEventListener("pointerdown", down);
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", cancel);
+        window.removeEventListener("blur", cancel);
+      };
+    }, [isReadingMode, canvasNode]);
+
     // Desktop Mouse Wheel & Trackpad Vertical Scroll
     const handleWheel = (e: React.WheelEvent) => {
       if (!isActive && !isReadingMode) return;
@@ -842,6 +921,7 @@ export const DarAlHikayatHandwriting = forwardRef<HandwritingHandle, DarAlHikaya
     useImperativeHandle(ref, () => ({
       getStrokes: () => strokesRef.current,
       getDataUrl: () => generateDataUrl(),
+      getPageRuled: () => isPageRuled,
       clear: () => handleClearAll(),
       undo: () => handleUndo(),
       redo: () => handleRedo(),
@@ -878,6 +958,8 @@ export const DarAlHikayatHandwriting = forwardRef<HandwritingHandle, DarAlHikaya
 
     const handwritingView = (
       <div
+        id="handwriting-document-layer"
+        data-mode={isActive ? "edit" : "read"}
         className="fixed inset-0 pointer-events-auto transition-opacity duration-300"
         style={{
           ...handwritingBgStyle,
@@ -890,9 +972,11 @@ export const DarAlHikayatHandwriting = forwardRef<HandwritingHandle, DarAlHikaya
           height: "100vh",
           overflow: "hidden",
           touchAction: "none",
-          zIndex: isReadingMode ? 20 : 999999,
+          zIndex: 999999,
         }}
         onClick={(e) => {
+          // Portals still bubble through the React editor tree.
+          e.stopPropagation();
           if ((e.target as HTMLElement)?.id === "handwriting-canvas-layer") {
             closePopups();
           }
@@ -936,8 +1020,31 @@ export const DarAlHikayatHandwriting = forwardRef<HandwritingHandle, DarAlHikaya
           }}
         />
 
+        {saveWarning && isActive && (
+          <div role="status" className="fixed top-20 left-1/2 -translate-x-1/2 z-[10000000] pointer-events-none w-max max-w-[calc(100vw-32px)]" dir="rtl">
+            <div className="backdrop-blur-xl rounded-full px-5 py-2.5 border shadow-2xl flex items-center gap-2.5"
+              style={{ backgroundColor: theme.isDark ? "rgba(25, 26, 35, 0.95)" : "rgba(255, 255, 255, 0.95)", borderColor: `${theme.accent}60` }}>
+              <span className="w-2 h-2 rounded-full flex-shrink-0 animate-pulse" style={{ backgroundColor: theme.accent }} />
+              <p className="font-zain-bold text-sm leading-normal" style={{ color: theme.text }}>{saveWarning}</p>
+            </div>
+          </div>
+        )}
+        {isSaving && (
+          <div className="fixed inset-0 z-[10000000] cursor-wait" aria-busy="true" onKeyDown={(e) => e.stopPropagation()}>
+            <span role="status" className="absolute top-20 left-1/2 -translate-x-1/2 rounded-full px-4 py-2 font-zain-bold text-sm"
+              style={{ backgroundColor: theme.bg, color: theme.text }}>جارٍ الحفظ…</span>
+          </div>
+        )}
+        {isReadingMode && (
+          <div className="fixed bottom-6 left-0 right-0 z-50 pointer-events-none text-center">
+            <span className="text-xs font-zain-reg" style={{ color: theme.secondary }}>
+              اسحب لقراءة الرسم، واضغط عليه للعودة للكتابة
+            </span>
+          </div>
+        )}
+
         {/* Top Header Capsule Bar (Strictly matching Dar Al Hikayat Editor Header Design) */}
-        {isActive && (
+        {(isActive || isReadingMode) && (
           <header
             className="fixed top-4 left-0 right-0 px-4 pointer-events-none flex justify-center items-center transition-all duration-300 ease-out"
             dir="rtl"
@@ -960,25 +1067,62 @@ export const DarAlHikayatHandwriting = forwardRef<HandwritingHandle, DarAlHikaya
                   onClick={onClose}
                   className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 transition-all cursor-pointer flex-shrink-0 apple-elastic-pinch"
                   style={{ color: theme.text }}
-                  title="رجوع وحفظ"
+                  disabled={isSaving}
+                  title={isReadingMode ? "خروج" : "رجوع"}
                 >
                   <ChevronRight className="w-4 h-4" strokeWidth={2.5} />
                 </button>
                 <div className="flex flex-col justify-center min-w-0 h-9 flex-1">
-                  <div className="flex items-center gap-1.5 min-w-0 max-w-full overflow-hidden w-full">
-                    <h1
-                      className="text-sm font-zain-bold truncate text-right leading-none min-w-0 flex-1 overflow-hidden whitespace-nowrap block select-none"
-                      style={{ color: theme.text }}
-                      title={title || "بدون عنوان"}
-                    >
-                      {title || "بدون عنوان"}
-                    </h1>
-                  </div>
+                  {isEditingTitle && isActive ? (
+                    <input
+                      aria-label="عنوان الحكاية"
+                      value={title || ""}
+                      placeholder="بدون عنوان"
+                      onChange={(e) => onTitleChange?.(e.target.value)}
+                      onBlur={() => setIsEditingTitle(false)}
+                      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                      disabled={isSaving}
+                      className={`bg-transparent text-sm font-zain-bold text-right outline-none w-full min-w-0 border-b leading-tight px-1 rounded-sm truncate apple-focus-glow ${
+                        theme.mode === "royal_classic" ? "apple-focus-glow-classic"
+                          : theme.mode === "night_whisper" ? "apple-focus-glow-night" : "apple-focus-glow-dark"
+                      }`}
+                      style={{ color: theme.text, borderColor: theme.border }}
+                      autoFocus
+                    />
+                  ) : (
+                    <div className="flex items-center gap-1.5 min-w-0 max-w-full overflow-hidden w-full">
+                      <h1
+                        onClick={() => isActive && !isSaving && setIsEditingTitle(true)}
+                        onKeyDown={(e) => {
+                          if (isActive && !isSaving && (e.key === "Enter" || e.key === " ")) {
+                            e.preventDefault();
+                            setIsEditingTitle(true);
+                          }
+                        }}
+                        role={isActive ? "button" : undefined}
+                        tabIndex={isActive ? 0 : undefined}
+                        className={`text-sm font-zain-bold truncate text-right leading-none min-w-0 flex-1 overflow-hidden whitespace-nowrap block select-none ${isActive ? "cursor-pointer" : ""}`}
+                        style={{ color: theme.text }}
+                        title={title || "بدون عنوان"}
+                      >
+                        {title || "بدون عنوان"}
+                      </h1>
+                    </div>
+                  )}
+                  {isDirty && isActive && (
+                    <div className="flex items-center justify-start pointer-events-none select-none mt-1 overflow-visible">
+                      <span className="font-zain-light font-normal text-right whitespace-nowrap opacity-75 inline-block select-none"
+                        style={{ fontSize: "9.5px", transform: "scale(0.82)", transformOrigin: "right center", lineHeight: "1", color: theme.secondary }}>
+                        توجد تغييرات غير محفوظة
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Left: Undo, Redo, Divider, Save/Check */}
               <div className="flex items-center gap-0.5 flex-shrink-0">
+                {isActive ? (<>
                 <button
                   onClick={handleUndo}
                   disabled={historyIndex <= 0}
@@ -1013,16 +1157,27 @@ export const DarAlHikayatHandwriting = forwardRef<HandwritingHandle, DarAlHikaya
                 />
 
                 <button
-                  onClick={onClose}
+                  onClick={handleSaveClick}
+                  disabled={isSaving}
                   className="w-9 h-9 flex items-center justify-center rounded-full active:scale-95 transition-all cursor-pointer shadow-sm apple-elastic-pinch"
                   style={{
                     backgroundColor: theme.mode === "apple_dark" ? "#F5F5F5" : theme.accent,
                     color: theme.mode === "apple_dark" ? "#000000" : theme.bg,
                   }}
-                  title="حفظ وإغلاق"
+                  title="حفظ"
                 >
                   <Check className="w-4 h-4" strokeWidth={2.8} />
                 </button>
+                </>) : (
+                  <button
+                    onClick={onReturnToEdit}
+                    className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 transition-all cursor-pointer"
+                    style={{ color: theme.text }}
+                    title="تعديل الكتابة اليدوية"
+                  >
+                    <PenTool className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
           </header>

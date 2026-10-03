@@ -44,12 +44,15 @@ export const RemoteKeyboardModal: React.FC<RemoteKeyboardModalProps> = ({
 
   if (!isOpen) return null;
 
-  const targetUrl = networkInfo
+  // ONE official path only: the native "كيبورد الحكايات" app scans this QR.
+  // The browser route is no longer offered as a pairing path (by design).
+  const pairingUrl = networkInfo?.primaryIp
     ? `${networkInfo.connectionUrl}?pin=${sessionPin}`
-    : `${window.location.origin}/#remote-keyboard?pin=${sessionPin}`;
+    : null;
 
   const copyUrl = () => {
-    navigator.clipboard.writeText(targetUrl);
+    if (!pairingUrl) return;
+    navigator.clipboard.writeText(pairingUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -144,7 +147,8 @@ export const RemoteKeyboardModal: React.FC<RemoteKeyboardModalProps> = ({
                   لوحة المفاتيح متصلة بنجاح!
                 </span>
                 <span className="font-zain-reg text-[11px] opacity-80 leading-tight">
-                  الكيبورد اللاسلكي شغال حالياً وتُنقل جميع النصوص والخواطر مباشرة للتابلت.
+                  كيبورد التابلت مخفي تلقائياً أثناء الاتصال. الكتابة والتشكيل والماوس (🖱️ من تطبيق
+                  الهاتف) تعمل مباشرة على دار الحكايات.
                 </span>
               </div>
             </div>
@@ -160,7 +164,7 @@ export const RemoteKeyboardModal: React.FC<RemoteKeyboardModalProps> = ({
               <div className="flex items-center justify-between text-[11px]">
                 <span style={{ color: themeSecondary }}>عنوان الرابط النشط:</span>
                 <span className="font-mono text-emerald-500 text-[10px] dir-ltr truncate max-w-[170px]">
-                  {targetUrl}
+                  {pairingUrl || "—"}
                 </span>
               </div>
               <div className="flex items-center justify-between text-[11px]">
@@ -204,14 +208,23 @@ export const RemoteKeyboardModal: React.FC<RemoteKeyboardModalProps> = ({
                   borderColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
                 }}
               >
-                <QRCodeSVG
-                  value={targetUrl}
-                  size={102}
-                  level="M"
-                  includeMargin={true}
-                  fgColor="#0F172A"
-                  bgColor="#FFFFFF"
-                />
+                {pairingUrl ? (
+                  <QRCodeSVG
+                    value={pairingUrl}
+                    size={102}
+                    level="M"
+                    includeMargin={true}
+                    fgColor="#0F172A"
+                    bgColor="#FFFFFF"
+                  />
+                ) : (
+                  <div className="w-[134px] h-[134px] flex flex-col items-center justify-center gap-2 text-center px-2">
+                    <Wifi className="w-5 h-5 opacity-60" style={{ color: themeAccent }} />
+                    <span className="text-[10px] font-zain-reg" style={{ color: themeSecondary }}>
+                      جارٍ تشغيل السيرفر المحلي…
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Details Column */}
@@ -219,10 +232,12 @@ export const RemoteKeyboardModal: React.FC<RemoteKeyboardModalProps> = ({
                 {/* Direct URL Box */}
                 <div className="flex flex-col gap-1">
                   <span
-                    className="text-[10px] font-zain-reg leading-none"
+                    className="text-[10px] font-zain-bold leading-tight"
                     style={{ color: themeSecondary }}
                   >
-                    افتح الرابط في الهاتف:
+                    ١. افتح تطبيق «كيبورد الحكايات» على الهاتف
+                    <br />
+                    ٢. امسح الرمز بالكاميرا للاقتران
                   </span>
                   <div
                     className="flex items-center justify-between px-3 py-1.5 rounded-full border min-w-0 bg-clip-padding"
@@ -237,7 +252,7 @@ export const RemoteKeyboardModal: React.FC<RemoteKeyboardModalProps> = ({
                       className="truncate text-[10px] font-mono dir-ltr min-w-0 pl-1"
                       style={{ color: themeAccent }}
                     >
-                      {targetUrl}
+                      {pairingUrl || "—"}
                     </span>
                     <button
                       onClick={copyUrl}
@@ -290,10 +305,12 @@ export const RemoteKeyboardModal: React.FC<RemoteKeyboardModalProps> = ({
               style={{ borderColor: themeBorder }}
             >
               <span
-                className="text-[10px] font-zain-reg opacity-80 leading-none"
+                className="text-[10px] font-zain-reg opacity-80 leading-tight"
                 style={{ color: themeSecondary }}
               >
-                سيعمل الاتصال في الخلفية بدون انقطاع
+                المسار الرسمي الوحيد: تطبيق كيبورد الحكايات 🖱️
+                <br />
+                الكتابة + التشكيل + الماوس والمؤشر داخل دار الحكايات
               </span>
 
               <button

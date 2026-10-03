@@ -20,11 +20,23 @@ SAFE_SHARED_PATHS = {
     "components/HomePage.tsx",
     "components/DarAlHikayatEditor.tsx",
     "components/DarAlHikayatHandwriting.tsx",
+    "components/HandwritingPreview.tsx",
+    "components/RemoteMouseCursor.tsx",
+    "components/RemoteKeyboardModal.tsx",
     "index.css",
     "lib/handwriting-eraser.ts",
+    "lib/handwriting-document.ts",
     "lib/logo-assets.ts",
+    "lib/remote-mouse.ts",
     "tests/handwriting-canvas-resize.test.tsx",
     "tests/handwriting-eraser.test.ts",
+    "tests/handwriting-editor-integration.test.tsx",
+    "tests/handwriting-preview.test.tsx",
+    "tests/handwriting-ux-lifecycle.test.tsx",
+    "tests/helpers/handwriting-dom.ts",
+    "tests/remote-keyboard-protocol.test.ts",
+    "tests/remote-mouse-cursor.test.tsx",
+    "tests/remote-mouse.test.ts",
 }
 SAFE_BINARY_PATHS = {
     "public/dar-al-hikayat-logo-transparent-apple_dark.png",
@@ -48,7 +60,7 @@ PROTECTED_PREFIXES = (
     "vite.config.ts",
 )
 NATIVE_MARKERS = re.compile(
-    r"@capacitor|Capacitor|android|Android|NativeBiometric|PrayerAlarm|tauri|schtasks|WindowsHello",
+    r"@capacitor|registerPlugin|NativeBiometric|PrayerAlarm|RemoteServer|tauri|schtasks|WindowsHello",
     re.IGNORECASE,
 )
 
